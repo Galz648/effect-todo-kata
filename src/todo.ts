@@ -1,14 +1,30 @@
-// Stage 0 — skeleton.
+// Stage 1 — an Effect is a description, not a running thing.
 //
-// You are on `main`. This file is intentionally almost empty.
-// Read GUIDE.md, then read hints/stage-1.md and start building here.
-//
-// Check your work against the reference at any point with:
-//   git diff main stage-1 -- src        (what Stage 1 adds)
-//   git diff stage-1 stage-2 -- src     (what Stage 2 adds)
-//   ...
-//
-// Run this file with:
-//   bun run src/todo.ts
+// Effect<A, E, R>:  A = success value, E = error value, R = required services.
+// Nothing runs until a runtime executes the description.
 
-console.log("nothing here yet — see hints/stage-1.md")
+import { Console, Effect } from "effect"
+
+// A program: logs a line, then produces 42.
+//   hover: Effect<number, never, never>
+const program = Effect.gen(function* () {
+  yield* Console.log("hello from an Effect")
+  return 42
+})
+
+// A failing value.
+//   hover: Effect<never, string, never>   <- the error type is "string"
+const boom = Effect.fail("nope")
+
+// Recovering flips the error slot to `never`.
+//   hover: Effect<void, never, never>
+const recovered = boom.pipe(
+  Effect.catchAll((e) => Console.log(`caught: ${e}`)),
+)
+
+// Descriptions above did nothing. Execution happens here:
+Effect.runPromise(program).then((n) => console.log("program returned", n))
+Effect.runPromise(recovered)
+
+// Try it: uncomment the next line and watch the promise reject.
+// Effect.runPromise(boom)
