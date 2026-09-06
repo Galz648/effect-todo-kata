@@ -1,12 +1,13 @@
-// Stage 2 — define the service. No implementation yet.
+// Stage 3 — first implementation: an in-memory Layer.
 //
-// A service = an interface (its value shape) + a Tag to look it up by.
-// You can write code against it before any Layer exists.
+// Layer  = a recipe for building a service.
+// Ref    = Effect's mutable cell.
+// provide = discharge an R requirement.
 
-import { Context, Data, Effect, Schema } from "effect"
+import { Clock, Console, Context, Data, Effect, Layer, Ref, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
-// Domain
+// Domain + error + service (unchanged from Stage 2)
 // ---------------------------------------------------------------------------
 
 const Todo = Schema.Struct({
@@ -17,17 +18,9 @@ const Todo = Schema.Struct({
 })
 type Todo = Schema.Schema.Type<typeof Todo>
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
 class TodoNotFound extends Data.TaggedError("TodoNotFound")<{
   readonly id: number
 }> {}
-
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
 
 class TodoRepo extends Context.Tag("TodoRepo")<
   TodoRepo,
@@ -40,25 +33,76 @@ class TodoRepo extends Context.Tag("TodoRepo")<
 >() {}
 
 // ---------------------------------------------------------------------------
-// A program that USES the service.
-//   hover addTwo: Effect<ReadonlyArray<Todo>, never, TodoRepo>
-//                                                  ^^^^^^^^ unmet requirement
+// Implementation: in-memory, backed by two Refs
 // ---------------------------------------------------------------------------
 
-const addTwo = Effect.gen(function* () {
+const TodoRepoMemory = Layer.effect(
+  TodoRepo,
+  Effect.gen(function* () {
+    const store = yield* Ref.make<ReadonlyArray<Todo>>([])
+    const nextId = yield* Ref.make(1)
+
+    const findOrFail = (todos: ReadonlyArray<Todo>, id: number) =>
+      todos.some((t) => t.id === id)
+        ? Effect.void
+        : Effect.fail(new TodoNotFound({ id }))
+
+    return TodoRepo.of({
+      list: Ref.get(store),
+
+      add: (text) =>
+        Effect.gen(function* () {
+          const id = yield* Ref.getAndUpdate(nextId, (n) => n + 1)
+          const now = yield* Clock.currentTimeMillis
+          const todo: Todo = { id, text, done: false, createdAt: now }
+          yield* Ref.update(store, (todos) => [...todos, todo])
+          return todo
+        }),
+
+      complete: (id) =>
+        Effect.gen(function* () {
+          const todos = yield* Ref.get(store)
+          yield* findOrFail(todos, id)
+          yield* Ref.set(
+            store,
+            todos.map((t) => (t.id === id ? { ...t, done: true } : t)),
+          )
+        }),
+
+      remove: (id) =>
+        Effect.gen(function* () {
+          const todos = yield* Ref.get(store)
+          yield* findOrFail(todos, id)
+          yield* Ref.set(
+            store,
+            todos.filter((t) => t.id !== id),
+          )
+        }),
+    })
+  }),
+)
+
+// ---------------------------------------------------------------------------
+// Run a program against the Layer
+// ---------------------------------------------------------------------------
+
+const demo = Effect.gen(function* () {
   const repo = yield* TodoRepo
   yield* repo.add("a")
   yield* repo.add("b")
+  yield* repo.complete(1)
+
+  // not-found path, recovered — E goes from TodoNotFound to never:
+  yield* repo
+    .complete(99)
+    .pipe(Effect.catchTag("TodoNotFound", (e) => Console.log(`no todo #${e.id}`)))
+
   return yield* repo.list
 })
 
-// This does NOT compile — TodoRepo is still required:
-//   Effect.runPromise(addTwo)
-//   Argument of type 'Effect<..., TodoRepo>' is not assignable to
-//   parameter of type 'Effect<..., never>'.
-//
-// Stage 3 provides a Layer and closes the gap.
+// Effect.provide closes the R gap; now it runs.
+Effect.runPromise(demo.pipe(Effect.provide(TodoRepoMemory))).then((todos) => {
+  console.log(todos)
+})
 
-console.log("Stage 2: TodoRepo defined, no implementation yet. See hints/stage-3.md")
-
-export { Todo, TodoNotFound, TodoRepo, addTwo }
+export { Todo, TodoNotFound, TodoRepo, TodoRepoMemory }
