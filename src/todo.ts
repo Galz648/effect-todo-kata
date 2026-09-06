@@ -1,30 +1,64 @@
-// Stage 1 — an Effect is a description, not a running thing.
+// Stage 2 — define the service. No implementation yet.
 //
-// Effect<A, E, R>:  A = success value, E = error value, R = required services.
-// Nothing runs until a runtime executes the description.
+// A service = an interface (its value shape) + a Tag to look it up by.
+// You can write code against it before any Layer exists.
 
-import { Console, Effect } from "effect"
+import { Context, Data, Effect, Schema } from "effect"
 
-// A program: logs a line, then produces 42.
-//   hover: Effect<number, never, never>
-const program = Effect.gen(function* () {
-  yield* Console.log("hello from an Effect")
-  return 42
+// ---------------------------------------------------------------------------
+// Domain
+// ---------------------------------------------------------------------------
+
+const Todo = Schema.Struct({
+  id: Schema.Number,
+  text: Schema.String,
+  done: Schema.Boolean,
+  createdAt: Schema.Number,
+})
+type Todo = Schema.Schema.Type<typeof Todo>
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+class TodoNotFound extends Data.TaggedError("TodoNotFound")<{
+  readonly id: number
+}> {}
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+class TodoRepo extends Context.Tag("TodoRepo")<
+  TodoRepo,
+  {
+    readonly list: Effect.Effect<ReadonlyArray<Todo>>
+    readonly add: (text: string) => Effect.Effect<Todo>
+    readonly complete: (id: number) => Effect.Effect<void, TodoNotFound>
+    readonly remove: (id: number) => Effect.Effect<void, TodoNotFound>
+  }
+>() {}
+
+// ---------------------------------------------------------------------------
+// A program that USES the service.
+//   hover addTwo: Effect<ReadonlyArray<Todo>, never, TodoRepo>
+//                                                  ^^^^^^^^ unmet requirement
+// ---------------------------------------------------------------------------
+
+const addTwo = Effect.gen(function* () {
+  const repo = yield* TodoRepo
+  yield* repo.add("a")
+  yield* repo.add("b")
+  return yield* repo.list
 })
 
-// A failing value.
-//   hover: Effect<never, string, never>   <- the error type is "string"
-const boom = Effect.fail("nope")
+// This does NOT compile — TodoRepo is still required:
+//   Effect.runPromise(addTwo)
+//   Argument of type 'Effect<..., TodoRepo>' is not assignable to
+//   parameter of type 'Effect<..., never>'.
+//
+// Stage 3 provides a Layer and closes the gap.
 
-// Recovering flips the error slot to `never`.
-//   hover: Effect<void, never, never>
-const recovered = boom.pipe(
-  Effect.catchAll((e) => Console.log(`caught: ${e}`)),
-)
+console.log("Stage 2: TodoRepo defined, no implementation yet. See hints/stage-3.md")
 
-// Descriptions above did nothing. Execution happens here:
-Effect.runPromise(program).then((n) => console.log("program returned", n))
-Effect.runPromise(recovered)
-
-// Try it: uncomment the next line and watch the promise reject.
-// Effect.runPromise(boom)
+export { Todo, TodoNotFound, TodoRepo, addTwo }
