@@ -1,13 +1,14 @@
-// Stage 3 — first implementation: an in-memory Layer.
+// Stage 4 — the CLI shell.
 //
-// Layer  = a recipe for building a service.
-// Ref    = Effect's mutable cell.
-// provide = discharge an R requirement.
+// @effect/cli turns process.argv into Effects. A command handler is just a
+// function returning an Effect that needs your services.
 
+import { Args, Command } from "@effect/cli"
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Clock, Console, Context, Data, Effect, Layer, Ref, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
-// Domain + error + service (unchanged from Stage 2)
+// Domain + error + service (unchanged from Stage 3)
 // ---------------------------------------------------------------------------
 
 const Todo = Schema.Struct({
@@ -33,7 +34,7 @@ class TodoRepo extends Context.Tag("TodoRepo")<
 >() {}
 
 // ---------------------------------------------------------------------------
-// Implementation: in-memory, backed by two Refs
+// In-memory implementation (unchanged from Stage 3)
 // ---------------------------------------------------------------------------
 
 const TodoRepoMemory = Layer.effect(
@@ -49,7 +50,6 @@ const TodoRepoMemory = Layer.effect(
 
     return TodoRepo.of({
       list: Ref.get(store),
-
       add: (text) =>
         Effect.gen(function* () {
           const id = yield* Ref.getAndUpdate(nextId, (n) => n + 1)
@@ -58,51 +58,71 @@ const TodoRepoMemory = Layer.effect(
           yield* Ref.update(store, (todos) => [...todos, todo])
           return todo
         }),
-
       complete: (id) =>
         Effect.gen(function* () {
           const todos = yield* Ref.get(store)
           yield* findOrFail(todos, id)
-          yield* Ref.set(
-            store,
-            todos.map((t) => (t.id === id ? { ...t, done: true } : t)),
-          )
+          yield* Ref.set(store, todos.map((t) => (t.id === id ? { ...t, done: true } : t)))
         }),
-
       remove: (id) =>
         Effect.gen(function* () {
           const todos = yield* Ref.get(store)
           yield* findOrFail(todos, id)
-          yield* Ref.set(
-            store,
-            todos.filter((t) => t.id !== id),
-          )
+          yield* Ref.set(store, todos.filter((t) => t.id !== id))
         }),
     })
   }),
 )
 
 // ---------------------------------------------------------------------------
-// Run a program against the Layer
+// CLI
 // ---------------------------------------------------------------------------
 
-const demo = Effect.gen(function* () {
-  const repo = yield* TodoRepo
-  yield* repo.add("a")
-  yield* repo.add("b")
-  yield* repo.complete(1)
+const render = (t: Todo) => `${t.done ? "x" : " "} #${t.id}  ${t.text}`
 
-  // not-found path, recovered — E goes from TodoNotFound to never:
-  yield* repo
-    .complete(99)
-    .pipe(Effect.catchTag("TodoNotFound", (e) => Console.log(`no todo #${e.id}`)))
+const add = Command.make(
+  "add",
+  { text: Args.text({ name: "text" }) },
+  ({ text }) =>
+    Effect.gen(function* () {
+      const repo = yield* TodoRepo
+      const todo = yield* repo.add(text)
+      yield* Console.log(`added #${todo.id}`)
+    }),
+)
 
-  return yield* repo.list
-})
+const list = Command.make("list", {}, () =>
+  Effect.gen(function* () {
+    const repo = yield* TodoRepo
+    const todos = yield* repo.list
+    if (todos.length === 0) {
+      yield* Console.log("(no todos)")
+    } else {
+      yield* Effect.forEach(todos, (t) => Console.log(render(t)), { discard: true })
+    }
+  }),
+)
 
-// Effect.provide closes the R gap; now it runs.
-Effect.runPromise(demo.pipe(Effect.provide(TodoRepoMemory))).then((todos) => {
-  console.log(todos)
-})
+const done = Command.make(
+  "done",
+  { id: Args.integer({ name: "id" }) },
+  ({ id }) =>
+    Effect.gen(function* () {
+      const repo = yield* TodoRepo
+      yield* repo
+        .complete(id)
+        .pipe(Effect.catchTag("TodoNotFound", (e) => Console.log(`no todo #${e.id}`)))
+    }),
+)
 
-export { Todo, TodoNotFound, TodoRepo, TodoRepoMemory }
+const todo = Command.make("todo").pipe(Command.withSubcommands([add, list, done]))
+
+const cli = Command.run(todo, { name: "todo", version: "0.0.0" })
+
+// NOTE: in-memory ⇒ state resets every invocation, so `list` is always empty
+// across separate runs. Stage 5 swaps in a file-backed Layer.
+cli(process.argv).pipe(
+  Effect.provide(TodoRepoMemory),
+  Effect.provide(NodeContext.layer),
+  NodeRuntime.runMain,
+)
