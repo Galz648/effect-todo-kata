@@ -1,0 +1,24 @@
+{
+  "name": "effect-todo-kata",
+  "version": "1.0.0",
+  "description": "A staged, branch-per-step kata for learning the Effect (TypeScript) core primitives",
+  "type": "module",
+  "scripts": {
+    "todo": "tsx src/todo.ts",
+    "typecheck": "tsc",
+    "demo": "tsx src/todo.ts"
+  },
+  "keywords": ["effect", "typescript", "kata", "tutorial"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@effect/cli": "^0.77.0",
+    "@effect/platform": "^0.97.1",
+    "@effect/platform-node": "^0.108.1",
+    "effect": "^3.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "~5.6"
+  }
+}
